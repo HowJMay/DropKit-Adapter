@@ -1,31 +1,69 @@
 package logger
 
 import (
-	nested "github.com/antonfisher/nested-logrus-formatter"
-	"github.com/sirupsen/logrus"
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-var ServiceConnectorLogger = logrus.New()
-var APIServerLogger = logrus.New()
-var InternalLogger = logrus.New()
+const (
+	DEBUG = iota
+	INFO
+	WARN
+	ERROR
+	FATAL
+)
 
-func init() {
-	ServiceConnectorLogger.SetFormatter(&nested.Formatter{
-		HideKeys:        true,
-		FieldsOrder:     []string{"component", "service"},
-		TimestampFormat: "2006-01-02 15:04:05",
-	})
+type LoggerLevel int
 
-	APIServerLogger.SetFormatter(&nested.Formatter{
-		HideKeys:        true,
-		FieldsOrder:     []string{"component", "command"},
-		TimestampFormat: "2006-01-02 15:04:05",
-	})
+func NewLogger(logLevel LoggerLevel, name string, opts ...zap.Option) (*zap.Logger, error) {
+	var zapLevel zapcore.Level
+	switch logLevel {
+	case DEBUG:
+		zapLevel = zapcore.DebugLevel
+	case INFO:
+		zapLevel = zapcore.InfoLevel
+	case WARN:
+		zapLevel = zapcore.WarnLevel
+	case ERROR:
+		zapLevel = zapcore.ErrorLevel
+	case FATAL:
+		zapLevel = zapcore.FatalLevel
+	default:
+		return nil, errors.New("unknown log level")
+	}
+	level := zap.NewAtomicLevel()
+	level.SetLevel(zapLevel)
 
-	InternalLogger.SetReportCaller(true)
-	InternalLogger.SetFormatter(&nested.Formatter{
-		HideKeys:        true,
-		FieldsOrder:     []string{"component", "path"},
-		TimestampFormat: "2006-01-02 15:04:05",
-	})
+	// Show the name of caller of the logging function
+	opts = append(opts, zap.AddCallerSkip(1))
+
+	config := zap.Config{
+		Level:    level,
+		Encoding: "json",
+		EncoderConfig: zapcore.EncoderConfig{
+			TimeKey:        "timestamp",
+			LevelKey:       "severity",
+			NameKey:        "name",
+			CallerKey:      "caller",
+			MessageKey:     "message",
+			EncodeLevel:    zapcore.CapitalLevelEncoder,
+			EncodeTime:     zapcore.ISO8601TimeEncoder,
+			EncodeDuration: zapcore.StringDurationEncoder,
+			EncodeCaller:   zapcore.ShortCallerEncoder,
+		},
+		OutputPaths:      []string{"stdout"},
+		ErrorOutputPaths: []string{"stderr"},
+	}
+
+	l, err := config.Build(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	if name != "" {
+		l = l.Named(name)
+	}
+
+	return l, nil
 }
